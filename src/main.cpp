@@ -26,32 +26,45 @@ const int STATE_PREPARE_RIGHT = 2;
 const int STATE_CHANGE_LEFT = 3;
 const int STATE_CHANGE_RIGHT = 4;
 
-float distance_cost (int goal_lane, int intended_lane, int final_lane) {
+struct Car
+{
+	double speed;
+	double s;
+	double d;
+};
 
+float inefficency_cost(int target_speed, int intended_lane, int final_lane, vector<int> lane_speed)
+{
 }
 
-float inefficency_cost (int target_speed, int intended_lane, int final_lane, vector<int> lane_speed) {
-	
-}
-
-vector<int> getNextStates(int state) {
+vector<int> getNextStates(int state)
+{
 	vector<int> nextStates;
-	if (state == STATE_MANTAIN_LANE) {
+	if (state == STATE_MANTAIN_LANE)
+	{
 		nextStates.push_back(STATE_MANTAIN_LANE);
 		nextStates.push_back(STATE_PREPARE_LEFT);
 		nextStates.push_back(STATE_PREPARE_RIGHT);
-	} else if (state == STATE_PREPARE_LEFT) {
+	}
+	else if (state == STATE_PREPARE_LEFT)
+	{
 		nextStates.push_back(STATE_PREPARE_LEFT);
 		nextStates.push_back(STATE_CHANGE_LEFT);
 		nextStates.push_back(STATE_MANTAIN_LANE);
-	} else if (state == STATE_PREPARE_RIGHT) {
+	}
+	else if (state == STATE_PREPARE_RIGHT)
+	{
 		nextStates.push_back(STATE_PREPARE_RIGHT);
 		nextStates.push_back(STATE_CHANGE_RIGHT);
 		nextStates.push_back(STATE_MANTAIN_LANE);
-	} else if (state == STATE_CHANGE_LEFT) {
+	}
+	else if (state == STATE_CHANGE_LEFT)
+	{
 		nextStates.push_back(STATE_CHANGE_LEFT);
 		nextStates.push_back(STATE_MANTAIN_LANE);
-	} else if (state == STATE_CHANGE_RIGHT) {
+	}
+	else if (state == STATE_CHANGE_RIGHT)
+	{
 		nextStates.push_back(STATE_CHANGE_RIGHT);
 		nextStates.push_back(STATE_MANTAIN_LANE);
 	}
@@ -215,6 +228,7 @@ int main()
 	int counter = 0;
 	double ref_vel = 0;
 	int state = STATE_MANTAIN_LANE;
+	int changed_lane = -1; 
 
 	// Waypoint map to read from
 	string map_file_ = "../data/highway_map.csv";
@@ -244,8 +258,8 @@ int main()
 		map_waypoints_dy.push_back(d_y);
 	}
 
-	h.onMessage([&counter, &state,&lane, &ref_vel, &map_waypoints_x, &map_waypoints_y, &map_waypoints_s, &map_waypoints_dx, &map_waypoints_dy](uWS::WebSocket<uWS::SERVER> ws, char *data, size_t length,
-																															  uWS::OpCode opCode) {
+	h.onMessage([&changed_lane,&counter, &state, &lane, &ref_vel, &map_waypoints_x, &map_waypoints_y, &map_waypoints_s, &map_waypoints_dx, &map_waypoints_dy](uWS::WebSocket<uWS::SERVER> ws, char *data, size_t length,
+																																				uWS::OpCode opCode) {
 		// "42" at the start of the message means there's a websocket message event.
 		// The 4 signifies a websocket message
 		// The 2 signifies a websocket event
@@ -265,11 +279,6 @@ int main()
 
 				if (event == "telemetry")
 				{
-					counter++;
-					if (counter == 500) {
-						cout << "Counter: " << counter;
-						lane = 2;
-					} 
 					// j[1] is the data JSON object
 
 					// Main car's localization Data
@@ -290,6 +299,20 @@ int main()
 					// Sensor Fusion Data, a list of all other cars on the same side of the road.
 					auto sensor_fusion = j[1]["sensor_fusion"];
 
+					if (changed_lane != -1) {
+						// check if the car changes the lane
+						int future_lane=-1;
+						if (state == STATE_CHANGE_LEFT)
+							future_lane = changed_lane - 1;
+						else if (state == STATE_CHANGE_RIGHT)
+							future_lane = changed_lane + 1;
+						
+						if ((car_d > future_lane *4) && (car_d < (future_lane+1)*4)) {
+							state = STATE_MANTAIN_LANE;
+							changed_lane = -1;
+						}
+
+					}
 
 					int prev_size = previous_path_x.size();
 
@@ -299,20 +322,185 @@ int main()
 					}
 
 					bool too_close = false;
+					vector<Car> left_lane;
+					vector<Car> center_lane;
+					vector<Car> right_lane;
+					double car_front_speed = 999999;
+
+
 
 					for (int i = 0; i < sensor_fusion.size(); i++)
 					{
 						float d = sensor_fusion[i][6];
+						double vx = sensor_fusion[i][3];
+						double vy = sensor_fusion[i][4];
+						double check_speed = sqrt(vx * vx + vy * vy);
+						double check_car_s = sensor_fusion[i][5];
+						Car car;
+						car.d = d;
+						car.speed = check_speed;
+						car.s = check_car_s;
+
+						if ((d > 0) && (d < 4))
+						{
+							left_lane.push_back(car);
+						}
+						else if ((d > 4) && (d < 8))
+						{
+							center_lane.push_back(car);
+						}
+						else if ((d > 8) && (d < 12))
+						{
+							right_lane.push_back(car);
+						}
+
 						if (d < (2 + 4 * lane + 2) && d > (2 + 4 * lane - 2))
 						{
-							double vx = sensor_fusion[i][3];
-							double vy = sensor_fusion[i][4];
-							double check_speed = sqrt(vx * vx + vy * vy);
-							double check_car_s = sensor_fusion[i][5];
+
 							check_car_s += ((double)prev_size * .02 * check_speed);
 							if ((check_car_s > car_s) && ((check_car_s - car_s) < 30))
 							{
 								too_close = true;
+								car_front_speed = check_speed;
+								
+							}
+						}
+					}
+
+					if (too_close)
+					{
+						if (state == STATE_MANTAIN_LANE)
+						{
+							if (lane == 0)
+							{
+								state = STATE_PREPARE_RIGHT;
+								double total_speed = 0.0;
+								bool collision = false;
+								for (int i = 0; i < center_lane.size(); i++)
+								{
+									Car car = center_lane[i];
+									total_speed = total_speed + car.speed;
+									double check_car_s = car.s;
+									double check_speed = car.speed;
+									//check_car_s += ((double)prev_size * .02 * check_speed);
+									if (abs(check_car_s - car_s) < 20)
+									{
+										collision = true;
+									}
+								}
+								if (collision == false)
+								{
+									changed_lane = lane;
+									lane = 1;
+									too_close = false;
+									state = STATE_CHANGE_RIGHT;
+								} else {
+									state = STATE_MANTAIN_LANE;
+								}
+							}
+							else if (lane == 1)
+							{
+								double total_speed_left = 0.0;
+								bool collision_left = false;
+								for (int i = 0; i < left_lane.size(); i++)
+								{
+									Car car = left_lane[i];
+									//if ((car.s > car_s) && (car.s < car_s + 30))
+										total_speed_left = total_speed_left + car.speed;
+									double check_car_s = car.s;
+									double check_speed = car.speed;
+									//check_car_s += ((double)prev_size * .02 * check_speed);
+									if (abs(check_car_s - car_s) < 20)
+									{
+										collision_left = true;
+									}
+								}
+
+								double total_speed_right = 0.0;
+								bool collision_right = false;
+								for (int i = 0; i < right_lane.size(); i++)
+								{
+									Car car = right_lane[i];
+									//if ((car.s > car_s) && (car.s < car_s + 30))
+										total_speed_right = total_speed_right + car.speed;
+									double check_car_s = car.s;
+									double check_speed = car.speed;
+									//check_car_s += ((double)prev_size * .02 * check_speed);
+									if (abs(check_car_s - car_s) < 20)
+									{
+										collision_right = true;
+									}
+								}
+
+								double avg_speed_left = total_speed_left / left_lane.size();
+								double avg_speed_right = total_speed_right / right_lane.size();
+								std::cout << "Avg Speed Left: " << avg_speed_left << std::endl;
+								std::cout << "Avg Speed Right " << avg_speed_right << std::endl;
+
+								if (avg_speed_left == 0)
+									avg_speed_left = 99999;
+								if (avg_speed_right == 0)	
+									avg_speed_right = 99999;
+								if ((avg_speed_left >= avg_speed_right)) {
+									if (collision_left == false)
+									{
+										changed_lane = lane;
+										lane = 0;
+										too_close = false;
+										state = STATE_CHANGE_LEFT;
+									} else if (collision_right == false)
+									{
+										changed_lane = lane;
+										lane = 2;
+										too_close = false;
+										state = STATE_CHANGE_RIGHT;
+									}
+								} else {
+									std::cout << "Mayor derecha que coche" << std::endl; 
+									if (collision_right == false)
+									{
+										changed_lane = lane;
+										lane = 2;
+										too_close = false;
+										state = STATE_CHANGE_RIGHT;
+									} else if (collision_left == false)
+									{
+										changed_lane = lane;
+										lane = 0;
+										too_close = false;
+										state = STATE_CHANGE_LEFT;
+									}									
+								}
+
+
+
+							}
+							else if (lane == 2)
+							{
+								state = STATE_PREPARE_LEFT;
+								double total_speed = 0.0;
+								bool collision = false;
+								for (int i = 0; i < center_lane.size(); i++)
+								{
+									Car car = center_lane[i];
+									total_speed = total_speed + car.speed;
+									double check_car_s = car.s;
+									double check_speed = car.speed;
+									//check_car_s += ((double)prev_size * .02 * check_speed);
+									if (abs(check_car_s - car_s) < 20)
+									{
+										collision = true;
+									}
+								}
+								if (collision == false)
+								{
+									changed_lane = lane;
+									lane = 1;
+									too_close = false;
+									state = STATE_CHANGE_LEFT;
+								} else {
+									state = STATE_MANTAIN_LANE;
+								}
 							}
 						}
 					}
@@ -395,7 +583,7 @@ int main()
 					for (int i = 1; i <= 50 - previous_path_x.size(); i++)
 					{
 						double N = (target_dist / (.02 * ref_vel / 2.24));
-						if (too_close)
+						if ((too_close))
 						{
 							ref_vel -= .224;
 						}
