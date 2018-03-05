@@ -17,7 +17,7 @@ The code compiles following the instructions
 
 The car is able to drive at least 4.32 miles without incident: The car is able to drive at least 4.32 miles between 5 and 6 minutes. It depends on traffic.
 
-![alt text](https://github.com/delafu/CarND-Path-Planning-Project/)
+![Image 1](https://github.com/delafu/CarND-Path-Planning-Project/blob/master/images/Capture1.png)
 
 The car drives according to the speed limit: The car is a good driver and never exceed he speed limit because we code that the desired speed is 49.5 Mph and using the approach from the Q&A of the project is impossible to exceed the speed limit setting the desired speed below the speed limit.
 
